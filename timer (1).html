@@ -1,0 +1,371 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desktop Timer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .container {
+            display: grid;
+            grid-template-rows: auto auto auto auto 1fr auto;
+            gap: 10px;
+            flex-grow: 1;
+        }
+        #timeDisplay {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        #commentInput {
+            width: 80%;
+            padding: 8px;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        #lapList {
+            list-style: none;
+            padding: 0;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            margin-bottom: 10px;
+        }
+        #lapList li {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #lapList input {
+            width: 50%;
+            padding: 5px;
+            font-size: 1em;
+        }
+        .button-container {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            position: sticky;
+            bottom: 20px;
+            background: #fff;
+            padding: 10px;
+            z-index: 10;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 1.2em;
+            min-width: 100px;
+            min-height: 48px;
+            touch-action: manipulation;
+            border-radius: 8px;
+        }
+        button:disabled {
+            opacity: 0.5;
+        }
+        #voiceStatus {
+            font-size: 0.9em;
+            color: #555;
+            margin-bottom: 10px;
+        }
+        #voiceStatus.listening {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        #voiceToggleButton.listening {
+            background-color: #d32f2f;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Desktop Timer</h1>
+        <div id="timeDisplay">00:00:00</div>
+        <div id="voiceStatus">Voice commands off: Click "Voice On" to enable (say "time" to record a lap)</div>
+        <input type="text" id="commentInput" placeholder="Enter lap comment">
+        <ul id="lapList"></ul>
+        <div class="button-container">
+            <button id="startButton">Start</button>
+            <button id="stopButton" disabled>Stop</button>
+            <button id="lapButton" disabled>Lap</button>
+            <button id="resetButton">Reset</button>
+            <button id="voiceToggleButton">Voice On</button>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        let startTime = 0;
+        let currentLapStart = 0;
+        let laps = [];
+        let timerInterval = null;
+        let voiceEnabled = false;
+
+        const timeDisplay = document.getElementById('timeDisplay');
+        const commentInput = document.getElementById('commentInput');
+        const lapList = document.getElementById('lapList');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const lapButton = document.getElementById('lapButton');
+        const resetButton = document.getElementById('resetButton');
+        const voiceToggleButton = document.getElementById('voiceToggleButton');
+        const voiceStatus = document.getElementById('voiceStatus');
+
+        // Initialize Web Speech API
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+                if (transcript === 'time' && isRunning && voiceEnabled) {
+                    addLap();
+                }
+            };
+
+            recognition.onstart = () => {
+                voiceStatus.textContent = 'Listening for "time"...';
+                voiceStatus.classList.add('listening');
+                voiceToggleButton.classList.add('listening');
+                voiceToggleButton.textContent = 'Voice Off';
+            };
+
+            recognition.onend = () => {
+                if (isRunning && voiceEnabled) {
+                    try {
+                        recognition.start(); // Restart if timer is running and voice is enabled
+                    } catch (e) {
+                        console.error('Failed to restart recognition:', e);
+                    }
+                } else {
+                    voiceStatus.textContent = 'Voice commands off: Click "Voice On" to enable (say "time" to record a lap)';
+                    voiceStatus.classList.remove('listening');
+                    voiceToggleButton.classList.remove('listening');
+                    voiceToggleButton.textContent = 'Voice On';
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                voiceStatus.textContent = 'Voice command error. Click "Voice On" to retry (say "time" to record a lap)';
+                voiceStatus.classList.remove('listening');
+                voiceToggleButton.classList.remove('listening');
+                voiceToggleButton.textContent = 'Voice On';
+                if (isRunning && voiceEnabled) {
+                    setTimeout(() => {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.error('Failed to restart recognition:', e);
+                        }
+                    }, 1000);
+                }
+            };
+        } else {
+            voiceStatus.textContent = 'Voice commands not supported in this browser';
+            voiceToggleButton.disabled = true;
+        }
+
+        function formatTime(elapsed) {
+            const hours = Math.floor(elapsed / 3600000);
+            const minutes = Math.floor((elapsed % 3600000) / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        function updateTimer() {
+            const currentTime = performance.now();
+            const elapsed = currentTime - startTime;
+            timeDisplay.textContent = formatTime(elapsed);
+        }
+
+        function startTimer() {
+            if (!isRunning) {
+                isRunning = true;
+                startTime = performance.now();
+                currentLapStart = startTime;
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                lapButton.disabled = false;
+                timerInterval = setInterval(updateTimer, 1000);
+                if (recognition && voiceEnabled) {
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        console.error('Failed to start recognition:', e);
+                    }
+                }
+            }
+        }
+
+        function stopTimer() {
+            if (isRunning) {
+                isRunning = false;
+                clearInterval(timerInterval);
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                lapButton.disabled = true;
+                if (recognition && voiceEnabled) {
+                    recognition.stop();
+                }
+            }
+        }
+
+        function resetTimer() {
+            isRunning = false;
+            clearInterval(timerInterval);
+            startTime = 0;
+            currentLapStart = 0;
+            laps = [];
+            timeDisplay.textContent = '00:00:00';
+            lapList.innerHTML = '';
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            lapButton.disabled = true;
+            commentInput.value = '';
+            if (recognition && voiceEnabled) {
+                recognition.stop();
+            }
+        }
+
+        function addLap() {
+            if (isRunning) {
+                const currentTime = performance.now();
+                const lapTime = currentTime - currentLapStart;
+                const totalTime = currentTime - startTime;
+                const comment = commentInput.value || '';
+                const lap = {
+                    lap_number: laps.length + 1,
+                    lap_time: formatTime(lapTime),
+                    total_time: formatTime(totalTime),
+                    comment: comment
+                };
+                laps.push(lap);
+                renderLap(lap);
+                currentLapStart = currentTime;
+                commentInput.value = '';
+            }
+        }
+
+        function renderLap(lap) {
+            const li = document.createElement('li');
+            li.innerHTML = `Lap ${lap.lap_number}: ${lap.lap_time} (Total: ${lap.total_time}) `;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = lap.comment;
+            input.placeholder = 'Edit comment';
+            input.addEventListener('change', () => {
+                lap.comment = input.value;
+            });
+            li.appendChild(input);
+            lapList.appendChild(li);
+        }
+
+        function exportToCSV() {
+            if (laps.length === 0) {
+                alert('No lap data to export!');
+                return;
+            }
+            const headers = ['Lap Number,Lap Time,Total Time,Comment'];
+            const rows = laps.map(lap => 
+                `${lap.lap_number},${lap.lap_time},${lap.total_time},${lap.comment.replace(/,/g, '')}`
+            );
+            const csvContent = headers.concat(rows).join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'timer_data.csv');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function toggleVoiceCommands() {
+            if (!recognition) return;
+            voiceEnabled = !voiceEnabled;
+            if (voiceEnabled && isRunning) {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error('Failed to start recognition:', e);
+                    voiceStatus.textContent = 'Voice command error. Try again.';
+                    voiceEnabled = false;
+                }
+            } else if (recognition) {
+                recognition.stop();
+            }
+        }
+
+        // Event listeners
+        startButton.addEventListener('click', startTimer);
+        stopButton.addEventListener('click', stopTimer);
+        lapButton.addEventListener('click', addLap);
+        resetButton.addEventListener('click', resetTimer);
+        voiceToggleButton.addEventListener('click', toggleVoiceCommands);
+
+        // Hotkey for lap (spacebar)
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space' && isRunning && document.activeElement !== commentInput) {
+                event.preventDefault();
+                addLap();
+            }
+        });
+
+        laps.forEach(renderLap);
+    </script>
+</body>
+</html>
