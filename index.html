@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#0f172a">
+  <title>Out-of-Stock Picker</title>
+  <style>
+    :root{
+      --bg:#0b1220;             /* slate-950-ish */
+      --panel:#0f172a;          /* slate-900 */
+      --muted:#94a3b8;          /* slate-400 */
+      --text:#e2e8f0;           /* slate-200 */
+      --brand:#22d3ee;          /* cyan-400 */
+      --accent:#a78bfa;         /* violet-400 */
+      --ok:#10b981;             /* emerald-500 */
+      --warn:#f59e0b;           /* amber-500 */
+      --err:#ef4444;            /* red-500 */
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color:var(--text); background:linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .wrap{max-width:1100px; margin:0 auto; padding:24px;}
+    header{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;
+    }
+    h1{font-size:clamp(20px,3vw,34px); margin:0; letter-spacing:.3px}
+    .card{
+      background: radial-gradient(120% 120% at 0% 0%, rgba(34,211,238,.08), transparent 45%),
+                  radial-gradient(120% 120% at 100% 0%, rgba(167,139,250,.08), transparent 45%),
+                  var(--panel);
+      border:1px solid rgba(148,163,184,.15);
+      border-radius:var(--radius); box-shadow:var(--shadow);
+    }
+    .toolbar{display:flex; flex-wrap:wrap; gap:8px; padding:12px;}
+    .tabs{display:flex; gap:6px; background:rgba(148,163,184,.08); padding:6px; border-radius:999px}
+    .tab{border:none; background:transparent; color:var(--muted); padding:10px 14px; border-radius:999px; cursor:pointer; font-weight:600}
+    .tab[aria-selected="true"]{ background:linear-gradient(135deg, rgba(34,211,238,.25), rgba(167,139,250,.25)); color:white }
+    .grid{display:grid; grid-template-columns:1fr; gap:16px; padding:16px}
+    @media (min-width:900px){ .grid{grid-template-columns:1.2fr .8fr} }
+
+    .panel{padding:16px; border-top:1px solid rgba(148,163,184,.12)}
+    .panel h2{font-size:18px; margin:0 0 8px}
+    label{display:block; font-weight:600; color:var(--muted); margin:10px 0 6px}
+    input[type="text"], input[type="email"], select{
+      width:100%; padding:12px 14px; border-radius:12px; border:1px solid rgba(148,163,184,.25);
+      background:#0b1322; color:var(--text); outline:none; transition:border .2s, box-shadow .2s;
+    }
+    input:focus, select:focus{border-color:var(--brand); box-shadow:0 0 0 3px rgba(34,211,238,.15)}
+
+    .btn{ display:inline-flex; align-items:center; gap:8px; border:none; cursor:pointer; font-weight:700;
+      padding:12px 16px; border-radius:14px; color:#0b1220; background:linear-gradient(135deg, #22d3ee, #a78bfa);
+      box-shadow:0 8px 20px rgba(34,211,238,.25), 0 4px 12px rgba(167,139,250,.20); transition:transform .06s ease-in-out;
+    }
+    .btn:active{ transform:translateY(1px); }
+    .btn-secondary{ background:#111827; color:var(--text); border:1px solid rgba(148,163,184,.25); box-shadow:none }
+
+    .muted{color:var(--muted)}
+    .chips{display:flex; flex-wrap:wrap; gap:8px}
+    .chip{padding:6px 10px; border-radius:999px; background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.25); font-size:13px}
+
+    .stack{display:grid; gap:10px}
+    .row{display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end}
+
+    .list{display:grid; gap:8px; max-height:420px; overflow:auto; padding:4px}
+    .item{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; border:1px solid rgba(148,163,184,.20); background:#0b1322}
+    .item input[type="checkbox"]{width:18px; height:18px}
+
+    .footer{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; padding:16px}
+    .note{font-size:13px}
+
+    .toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#111827; color:var(--text);
+      border:1px solid rgba(148,163,184,.20); padding:10px 14px; border-radius:10px; box-shadow:var(--shadow); display:none}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Out‑of‑Stock Picker</h1>
+      <div class="chips" role="status" aria-live="polite">
+        <span class="chip">iPhone 12+ ready</span>
+        <span class="chip">Desktop friendly</span>
+        <span class="chip">Works offline*</span>
+      </div>
+    </header>
+
+    <section class="card" aria-label="Mode selector and inputs">
+      <div class="toolbar">
+        <div class="tabs" role="tablist" aria-label="Select input mode">
+          <button class="tab" id="tab-dropdown" role="tab" aria-selected="true" aria-controls="panel-dropdown">Dropdown mode</button>
+          <button class="tab" id="tab-select" role="tab" aria-selected="false" aria-controls="panel-select">Selection list mode</button>
+        </div>
+        <div class="spacer" style="flex:1 1 auto"></div>
+        <button id="btn-clear" class="btn-secondary btn" title="Clear selections">Clear</button>
+      </div>
+
+      <div class="grid">
+        <!-- LEFT: MODE PANELS -->
+        <div>
+          <!-- DROPDOWN MODE -->
+          <div id="panel-dropdown" class="panel" role="tabpanel" aria-labelledby="tab-dropdown">
+            <h2>Pick items via dropdowns</h2>
+            <p class="muted">Add as many dropdowns as you like. Leave unused ones blank.</p>
+            <div class="stack" id="dropdown-container"></div>
+            <div style="margin-top:10px; display:flex; gap:8px">
+              <button class="btn-secondary btn" id="add-dropdown">+ Add dropdown</button>
+              <button class="btn-secondary btn" id="remove-dropdown">− Remove dropdown</button>
+            </div>
+          </div>
+
+          <!-- SELECTION LIST MODE -->
+          <div id="panel-select" class="panel" role="tabpanel" aria-labelledby="tab-select" hidden>
+            <h2>Select from list</h2>
+            <label for="search">Search items</label>
+            <input id="search" type="text" inputmode="search" placeholder="Type to filter (e.g., pipette, tip, centrifuge)…" autocomplete="off">
+            <div class="list" id="item-list" aria-label="Items with checkboxes"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT: META / SEND -->
+        <aside class="panel" style="position:relative">
+          <h2>Send email</h2>
+          <label for="to">Send to</label>
+          <input id="to" type="email" placeholder="orders@example.com" autocomplete="email" inputmode="email">
+
+          <div class="row">
+            <div>
+              <label for="name">Your name</label>
+              <input id="name" type="text" placeholder="Name" autocomplete="name">
+            </div>
+            <div>
+              <label for="subject">Subject</label>
+              <input id="subject" type="text" value="Out of stock items" />
+            </div>
+          </div>
+
+          <label for="prefix">Greeting</label>
+          <input id="prefix" type="text" value="Hi," />
+
+          <div style="margin:14px 0 8px" class="muted">
+            Preview
+          </div>
+          <div id="preview" class="card" style="padding:12px; background:#0a1324; border-radius:12px"></div>
+
+          <div class="footer">
+            <button id="send" class="btn">✉️ Send email</button>
+            <button id="copy" class="btn-secondary btn" title="Copy mailto link">Copy link</button>
+            <span class="note muted">*The page works offline after first load (no tracking, no cookies).</span>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    // ======== CONFIG ========
+    // Edit these lists to fit your lab. This file is static and easy to maintain on GitHub.
+    const ITEMS = [
+      "Pipette tips 10µL","Pipette tips 200µL","Pipette tips 1000µL","PCR tubes 0.2 mL","Microcentrifuge tubes 1.5 mL",
+      "Microcentrifuge tubes 2.0 mL","Serological pipettes 5 mL","Serological pipettes 10 mL","Serological pipettes 25 mL",
+      "Conical tubes 15 mL","Conical tubes 50 mL","Syringe filters 0.22 µm","Syringe filters 0.45 µm",
+      "ProtA resin","ProtG resin","His resin","HC1-XL resin","Protein A columns 1 mL",
+      "HPLC vials","HP-SEC column guard","CE-SDS sample buffer","Endotoxin assay cartridges",
+      "Octet biosensors AHC","Octet biosensors HIS1K","FPLC tubing 1/16\"","0.9% NaCl","PBS tablets",
+      "Sterile filters 0.22 µm 500 mL","Sterile filters 0.1 µm 500 mL","T75 flasks","T175 flasks","96-well plates U-bottom",
+      "96-well plates flat-bottom","Spin columns","His-tag elution buffer","Imidazole 500 mM","Tris-HCl 1 M",
+      "SDS-PAGE gels 4–12%","SDS-PAGE running buffer","Coomassie stain","Western blot PVDF 0.45 µm",
+      "DTT","Iodoacetamide","Glycerol","Tween-20","Formic acid"
+    ];
+
+    // ======== UTIL ========
+    const $ = (sel, el=document) => el.querySelector(sel);
+    const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+
+    function showToast(msg){
+      const t = $('#toast');
+      t.textContent = msg; t.style.display='block';
+      setTimeout(()=> t.style.display='none', 2200);
+    }
+
+    function setTab(activeId){
+      const tabs = $$('.tab');
+      tabs.forEach(btn => btn.setAttribute('aria-selected', String(btn.id === activeId)));
+      $('#panel-dropdown').hidden = activeId !== 'tab-dropdown';
+      $('#panel-select').hidden   = activeId !== 'tab-select';
+      updatePreview();
+    }
+
+    function createDropdownRow(value=""){
+      const wrap = document.createElement('div');
+      wrap.className = 'row';
+      const select = document.createElement('select');
+      select.innerHTML = `<option value="">— Choose item —</option>` + ITEMS.map(i=>`<option>${i}</option>`).join('');
+      if(value) select.value = value;
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'btn-secondary btn';
+      removeBtn.type = 'button';
+      removeBtn.textContent = 'Clear';
+      removeBtn.addEventListener('click', ()=>{ select.value=""; updatePreview(); });
+      wrap.appendChild(select); wrap.appendChild(removeBtn);
+      select.addEventListener('change', updatePreview);
+      return wrap;
+    }
+
+    function getSelectedItems(){
+      const activeDropdown = $('#tab-dropdown').getAttribute('aria-selected') === 'true';
+      if(activeDropdown){
+        return $$('#dropdown-container select').map(s=>s.value).filter(Boolean);
+      } else {
+        return $$('#item-list input[type=checkbox]:checked').map(c=>c.value);
+      }
+    }
+
+    function updatePreview(){
+      const items = getSelectedItems();
+      const name = $('#name').value.trim();
+      const prefix = $('#prefix').value.trim() || 'Hi,';
+      const bullet = '• ';
+      const body = `${prefix}\n\nThese items are out of stock:\n${items.map(i=> bullet + i).join('\n')}${items.length ? '\n\n' : '\n'}Kind regards,\n${name || ''}`.trim();
+      const html = body
+        .replaceAll('\n','<br>')
+        .replaceAll('•','&bull;');
+      $('#preview').innerHTML = `<div style="white-space:normal; word-break:break-word">${html}</div>`;
+    }
+
+    function buildMailto(){
+      const to = $('#to').value.trim() || 'orders@example.com';
+      const subject = $('#subject').value.trim() || 'Out of stock items';
+      const items = getSelectedItems();
+      if(items.length === 0){ showToast('Select at least one item.'); return; }
+      const name = $('#name').value.trim();
+      const prefix = $('#prefix').value.trim() || 'Hi,';
+      const bullet = '• ';
+      const body = `${prefix}\n\nThese items are out of stock:\n${items.map(i=> bullet + i).join('\n')}\n\nKind regards,\n${name}`;
+
+      const url = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      // mailto URLs can be long; warn if we exceed ~1800 chars which may break in some clients
+      if(url.length > 1800){
+        showToast('Email too long for some clients. Try fewer items.');
+      }
+      window.location.href = url;
+    }
+
+    function copyMailto(){
+      const to = $('#to').value.trim() || 'orders@example.com';
+      const subject = $('#subject').value.trim() || 'Out of stock items';
+      const items = getSelectedItems();
+      if(items.length === 0){ showToast('Select at least one item.'); return; }
+      const name = $('#name').value.trim();
+      const prefix = $('#prefix').value.trim() || 'Hi,';
+      const bullet = '• ';
+      const body = `${prefix}\n\nThese items are out of stock:\n${items.map(i=> bullet + i).join('\n')}\n\nKind regards,\n${name}`;
+      const url = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      navigator.clipboard.writeText(url).then(()=> showToast('Mailto link copied.'), ()=> showToast('Could not copy link'));
+    }
+
+    function renderList(filter=""){
+      const list = $('#item-list');
+      list.innerHTML = '';
+      const term = filter.trim().toLowerCase();
+      const filtered = term ? ITEMS.filter(i=> i.toLowerCase().includes(term)) : ITEMS;
+      filtered.forEach(i =>{
+        const row = document.createElement('div'); row.className='item';
+        const cb = document.createElement('input'); cb.type='checkbox'; cb.id = 'i-'+Math.random().toString(36).slice(2,8); cb.value=i;
+        const label = document.createElement('label'); label.setAttribute('for', cb.id); label.textContent = i;
+        cb.addEventListener('change', updatePreview);
+        row.appendChild(cb); row.appendChild(label); list.appendChild(row);
+      });
+    }
+
+    function clearSelections(){
+      $$('#dropdown-container select').forEach(s=> s.value='');
+      $$('#item-list input[type=checkbox]').forEach(cb=> cb.checked=false);
+      updatePreview();
+    }
+
+    // ======== INIT ========
+    (function(){
+      // Tabs
+      $('#tab-dropdown').addEventListener('click', ()=> setTab('tab-dropdown'));
+      $('#tab-select').addEventListener('click',   ()=> setTab('tab-select'));
+
+      // Dropdowns default: 3 rows
+      const container = $('#dropdown-container');
+      for(let i=0;i<3;i++){ container.appendChild(createDropdownRow()); }
+      $('#add-dropdown').addEventListener('click', ()=>{ container.appendChild(createDropdownRow()); updatePreview(); });
+      $('#remove-dropdown').addEventListener('click', ()=>{ if(container.lastElementChild){ container.removeChild(container.lastElementChild); updatePreview(); } });
+
+      // List mode
+      renderList();
+      $('#search').addEventListener('input', e=> renderList(e.target.value));
+
+      // Form changes update preview
+      ['to','name','subject','prefix'].forEach(id=> $('#'+id).addEventListener('input', updatePreview));
+
+      // Actions
+      $('#send').addEventListener('click', buildMailto);
+      $('#copy').addEventListener('click', copyMailto);
+      $('#btn-clear').addEventListener('click', clearSelections);
+
+      // First render
+      updatePreview();
+    })();
+
+    // ======== Minimal offline support (optional) ========
+    if('serviceWorker' in navigator){
+      // A tiny, self-contained service worker for offline caching of this single file.
+      const sw = new Blob([`
+        self.addEventListener('install', e=>{
+          e.waitUntil(caches.open('stock-picker-v1').then(c=> c.addAll(['./'])));
+        });
+        self.addEventListener('fetch', e=>{
+          e.respondWith(caches.match(e.request).then(r=> r || fetch(e.request)));
+        });
+      `], {type:'text/javascript'});
+      const swUrl = URL.createObjectURL(sw);
+      navigator.serviceWorker.register(swUrl).catch(()=>{});
+    }
+  </script>
+</body>
+</html>
